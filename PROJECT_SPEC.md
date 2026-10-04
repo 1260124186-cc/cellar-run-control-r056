@@ -97,6 +97,38 @@ time, gravity, temperature, optional note, and receipt time.
 - Gravity must not rise more than 0.010 above the immediately preceding value.
 - Observation sequences are contiguous and start at 1.
 
+### ScheduledAction
+
+A scheduled action is a durable, one-shot queue entry that performs a run
+transition at a set time. It contains an identifier, target run identifier,
+action name, scheduled time, queue state, attempt count, optional note,
+claim and finish timestamps, failure code and reason, version fields, and
+timestamps.
+
+States are `waiting`, `running`, `succeeded`, and `needs_attention`.
+
+- The only action is `start_fermentation`, moving a reserved run into
+  fermentation.
+- A run can have at most one active (waiting or running) entry per action.
+- Registration and the business change that enables it commit in one
+  snapshot revision. In particular, a reservation can carry
+  `scheduled_start_at`, so vessel reservation and schedule cannot split.
+- A due pass claims the entry (`waiting -> running`) in its own committed
+  transaction, then executes the transition and writes the terminal state
+  (`succeeded` or `needs_attention`) together with the business change.
+- An entry is attempted at most once. It is never retried.
+- On startup or the next pass, every left-over `running` entry is parked as
+  `needs_attention` with code `scheduled_action_interrupted`. A claim
+  without a committed result might or might not have applied, so an operator
+  must inspect the run before any further action.
+- A waiting entry can be cancelled. Claimed and terminal entries cannot.
+- Succeeded and needs-attention entries are retained and stay queryable.
+- Domain transition guards remain authoritative, so a run moved manually,
+  aborted, or otherwise out of state is never advanced twice; that attempt
+  is parked with a stable failure code and reason.
+- Each due entry is processed independently, so one parked entry cannot
+  block the other due entries.
+
 ## Connected Workflows
 
 ### 1. Formula Approval
@@ -150,6 +182,28 @@ transitions return stable failures without changing persisted state.
 This path crosses HTTP protocol handling, application orchestration, numeric
 domain rules, and snapshot storage.
 
+### 4. Scheduled Fermentation Start
+
+Public entry points are:
+
+- `POST /v1/runs/{id}/reserve` (with `scheduled_start_at`)
+- `POST /v1/runs/{id}/schedule`
+- `GET /v1/scheduled-actions`
+- `GET /v1/scheduled-actions/{id}`
+- `POST /v1/scheduled-actions/{id}/cancel`
+- `POST /v1/scheduler/tick`
+
+The client reserves a vessel and registers a start time atomically, or
+schedules an already-reserved run. At the scheduled time the local scheduler
+claims the entry once and moves the run to fermentation. Entries that are due
+while their run is no longer eligible are parked with a reason instead of
+being retried, and they do not block other due entries. Duplicate active
+registrations and cancellation of non-waiting entries return stable failures.
+
+This path crosses HTTP protocol handling, background scheduling,
+cross-process locking, use-case recovery rules, domain transition guards, and
+snapshot storage.
+
 ## Modules
 
 - `cmd/fermentctl`: executable entry point for the HTTP service and bounded
@@ -158,7 +212,9 @@ domain rules, and snapshot storage.
 - `internal/clock`: deterministic clock boundary for production and checks.
 - `internal/domain`: entities, validation, state transitions, and metrics.
 - `internal/service`: use-case orchestration and revision coordination.
-- `internal/storage`: snapshot repository, atomic replacement, and locking.
+- `internal/storage`: snapshot repository, atomic replacement, locking, and
+  the cross-process scheduler lock.
+- `internal/scheduler`: background loop that triggers scheduler passes.
 - `internal/httpapi`: routing, strict JSON decoding, error mapping, and health.
 - `internal/workflowcheck`: real HTTP workflow checks used by the executable.
 
@@ -198,6 +254,13 @@ an in-process mutex. The complete state is encoded, committed to durable
 storage, and then atomically renamed over the target. An update is not
 published in memory unless persistence succeeds.
 
+Scheduled actions live in the same revisioned snapshot. Their claim and
+terminal result are separate committed transitions, which is what makes a
+scheduled transition at-most-once. Scheduler passes across processes are
+serialized by an exclusive, non-blocking flock on `schedule.lock` in the
+data directory; a controller that cannot acquire it skips its pass. The
+kernel releases the lock if the process exits.
+
 Reads use copied values and never expose repository-owned maps or slices. The
 default address is `127.0.0.1:8088`, the request body limit is 1 MiB, and all
 workflow checks use temporary directories.
@@ -217,6 +280,7 @@ behavior, and exit without external services:
 - `go run ./cmd/fermentctl check formula-approval`
 - `go run ./cmd/fermentctl check vessel-run-lifecycle`
 - `go run ./cmd/fermentctl check observations-completion`
+- `go run ./cmd/fermentctl check scheduled-start`
 
 ## Scope Limits
 

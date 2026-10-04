@@ -37,6 +37,7 @@ Environment variables:
 
 - `CELLAR_CONTROL_ADDR`: HTTP listen address.
 - `CELLAR_CONTROL_DATA_DIR`: directory containing `state.json`.
+- `CELLAR_CONTROL_SCHEDULE_INTERVAL`: background scheduler interval (default `5s`).
 
 Example:
 
@@ -54,8 +55,9 @@ internal/clock                 time boundary
 internal/config                environment configuration
 internal/domain                entities, validation, transitions, metrics
 internal/httpapi               HTTP routes, JSON decoding, errors
+internal/scheduler             background scheduler loop and lifecycle
 internal/service               use-case orchestration
-internal/storage               revisioned snapshot persistence
+internal/storage               revisioned snapshot persistence, cross-process lock
 internal/workflowcheck         real HTTP production checks
 ```
 
@@ -94,6 +96,14 @@ Run workflow:
 - `POST /v1/runs/{id}/complete`
 - `POST /v1/runs/{id}/abort`
 
+Local scheduling:
+
+- `POST /v1/runs/{id}/schedule`
+- `GET /v1/scheduled-actions`
+- `GET /v1/scheduled-actions/{id}`
+- `POST /v1/scheduled-actions/{id}/cancel`
+- `POST /v1/scheduler/tick`
+
 Writes accept an optional `X-Expected-Version` header. Errors use a stable
 shape:
 
@@ -115,11 +125,72 @@ Run each production workflow check separately:
 go run ./cmd/fermentctl check formula-approval
 go run ./cmd/fermentctl check vessel-run-lifecycle
 go run ./cmd/fermentctl check observations-completion
+go run ./cmd/fermentctl check scheduled-start
 ```
 
 Each check creates a temporary snapshot directory, starts the real HTTP
 handler on a loopback listener, issues JSON requests, verifies success and
 failure behavior, and removes its temporary data.
+
+## Local Scheduling
+
+A run can register a one-shot transition that the local background
+scheduler performs when its time arrives, removing the need to watch the
+list and press "start" by hand. The only action today is
+`start_fermentation`, which moves a reserved run into fermentation.
+
+Register either together with the reservation (the schedule and the
+reservation commit in one snapshot revision, so they cannot be split):
+
+```json
+POST /v1/runs/{id}/reserve
+{
+  "vessel_id": "vessel_…",
+  "scheduled_start_at": "2026-10-05T06:00:00Z"
+}
+```
+
+or independently for an already-reserved run:
+
+```json
+POST /v1/runs/{id}/schedule
+{
+  "action": "start_fermentation",
+  "scheduled_at": "2026-10-05T06:00:00Z",
+  "note": "optional operator note"
+}
+```
+
+Each entry moves through a queryable queue: `waiting` → `running` →
+`succeeded` or `needs_attention`. Terminal entries are retained with their
+outcome. List them with `GET /v1/scheduled-actions`, optionally filtered by
+`run_id` or `state`, and read or cancel an individual entry. A waiting
+entry can be removed with `POST /v1/scheduled-actions/{id}/cancel`.
+
+Guarantees:
+
+- **Attempted at most once.** The entry is persisted as `running` before
+  the transition runs; the result is committed in the same transaction as
+  the transition. It is never retried.
+- **Recovery, not retry.** If the process disappears while an entry is
+  `running` (claim and result never landed together), the next scheduler
+  pass parks it as `needs_attention` with code
+  `scheduled_action_interrupted` instead of applying the transition a
+  second time. The operator checks the run and resolves it manually.
+- **Multiple controllers.** Scheduler passes take an exclusive,
+  non-blocking lock on `<data-directory>/schedule.lock`; controllers that
+  wake together skip rather than race.
+- **Failure isolation.** Every due entry is processed in its own
+  transaction; one parked entry records its `failure_code` and
+  `failure_reason` without delaying or blocking the others.
+- **Domain guards still apply.** A run moved by hand, aborted, or otherwise
+  out of state cannot be advanced a second time; that attempt parks with a
+  stable reason.
+
+A background pass runs at startup and then every
+`CELLAR_CONTROL_SCHEDULE_INTERVAL` (default `5s`). `POST /v1/scheduler/tick`
+runs one pass immediately and returns a summary; a locked controller
+reports `"skipped": true`.
 
 ## Persistence And Recovery
 

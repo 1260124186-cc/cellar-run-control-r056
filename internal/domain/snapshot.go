@@ -3,25 +3,27 @@ package domain
 import "time"
 
 type Snapshot struct {
-	Revision    int64                      `json:"revision"`
-	UpdatedAt   time.Time                  `json:"updated_at"`
-	Formulas    map[string]Formula         `json:"formulas"`
-	Vessels     map[string]Vessel          `json:"vessels"`
-	Runs        map[string]FermentationRun `json:"runs"`
-	NameIndex   map[string]string          `json:"formula_name_index"`
-	VesselIndex map[string]string          `json:"vessel_code_index"`
-	RunIndex    map[string]string          `json:"run_code_index"`
+	Revision         int64                      `json:"revision"`
+	UpdatedAt        time.Time                  `json:"updated_at"`
+	Formulas         map[string]Formula         `json:"formulas"`
+	Vessels          map[string]Vessel          `json:"vessels"`
+	Runs             map[string]FermentationRun `json:"runs"`
+	ScheduledActions map[string]ScheduledAction `json:"scheduled_actions"`
+	NameIndex        map[string]string          `json:"formula_name_index"`
+	VesselIndex      map[string]string          `json:"vessel_code_index"`
+	RunIndex         map[string]string          `json:"run_code_index"`
 }
 
 func EmptySnapshot() Snapshot {
 	return Snapshot{
-		Revision:    0,
-		Formulas:    map[string]Formula{},
-		Vessels:     map[string]Vessel{},
-		Runs:        map[string]FermentationRun{},
-		NameIndex:   map[string]string{},
-		VesselIndex: map[string]string{},
-		RunIndex:    map[string]string{},
+		Revision:         0,
+		Formulas:         map[string]Formula{},
+		Vessels:          map[string]Vessel{},
+		Runs:             map[string]FermentationRun{},
+		ScheduledActions: map[string]ScheduledAction{},
+		NameIndex:        map[string]string{},
+		VesselIndex:      map[string]string{},
+		RunIndex:         map[string]string{},
 	}
 }
 
@@ -42,6 +44,9 @@ func (s Snapshot) Clone() Snapshot {
 	}
 	for key, value := range s.Runs {
 		cloned.Runs[key] = value.Clone()
+	}
+	for key, value := range s.ScheduledActions {
+		cloned.ScheduledActions[key] = value.Clone()
 	}
 	for key, value := range s.NameIndex {
 		cloned.NameIndex[key] = value

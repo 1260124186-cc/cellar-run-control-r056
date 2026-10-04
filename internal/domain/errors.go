@@ -23,6 +23,10 @@ const (
 	CodeObservationConflict Code = "observation_conflict"
 	CodeRevisionConflict    Code = "revision_conflict"
 	CodeStorage             Code = "storage_error"
+	CodeScheduleNotFound    Code = "scheduled_action_not_found"
+	CodeScheduleConflict    Code = "scheduled_action_conflict"
+	CodeScheduleState       Code = "invalid_scheduled_action_state"
+	CodeScheduleInterrupted Code = "scheduled_action_interrupted"
 )
 
 type Error struct {

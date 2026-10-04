@@ -18,6 +18,7 @@ const (
 type Config struct {
 	Address           string
 	DataDir           string
+	SchedulerInterval time.Duration
 	ReadHeaderTimeout time.Duration
 	ReadTimeout       time.Duration
 	WriteTimeout      time.Duration
@@ -29,6 +30,7 @@ func FromEnv() (Config, error) {
 	cfg := Config{
 		Address:           valueOrDefault("CELLAR_CONTROL_ADDR", DefaultAddress),
 		DataDir:           valueOrDefault("CELLAR_CONTROL_DATA_DIR", DefaultDataDir),
+		SchedulerInterval: durationOrDefault("CELLAR_CONTROL_SCHEDULE_INTERVAL", 5*time.Second),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      20 * time.Second,
@@ -55,6 +57,9 @@ func (c Config) Validate() (Config, error) {
 	if c.ReadHeaderTimeout <= 0 || c.ReadTimeout <= 0 || c.WriteTimeout <= 0 {
 		return Config{}, fmt.Errorf("HTTP timeouts must be positive")
 	}
+	if c.SchedulerInterval <= 0 {
+		return Config{}, fmt.Errorf("scheduler interval must be positive")
+	}
 	if c.IdleTimeout <= 0 || c.ShutdownTimeout <= 0 {
 		return Config{}, fmt.Errorf("idle and shutdown timeouts must be positive")
 	}
@@ -73,4 +78,16 @@ func valueOrDefault(name, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func durationOrDefault(name string, fallback time.Duration) time.Duration {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }

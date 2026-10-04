@@ -15,7 +15,8 @@ type createRunRequest struct {
 }
 
 type reserveRunRequest struct {
-	VesselID string `json:"vessel_id"`
+	VesselID         string     `json:"vessel_id"`
+	ScheduledStartAt *time.Time `json:"scheduled_start_at"`
 }
 
 type observationRequest struct {
@@ -72,15 +73,20 @@ func registerRunRoutes(mux *http.ServeMux, app *service.Service) {
 		if !handleDecode(response, err) {
 			return
 		}
-		run, vessel, err := app.ReserveRun(request.PathValue("id"), service.ReserveRunInput{
-			ExpectedVersion: expected,
-			VesselID:        body.VesselID,
+		run, vessel, scheduled, err := app.ReserveRun(request.PathValue("id"), service.ReserveRunInput{
+			ExpectedVersion:  expected,
+			VesselID:         body.VesselID,
+			ScheduledStartAt: body.ScheduledStartAt,
 		})
 		if err != nil {
 			writeDomainError(response, err)
 			return
 		}
-		writeJSON(response, http.StatusOK, map[string]any{"run": run, "vessel": vessel})
+		result := map[string]any{"run": run, "vessel": vessel}
+		if scheduled != nil {
+			result["scheduled_action"] = *scheduled
+		}
+		writeJSON(response, http.StatusOK, result)
 	})
 
 	mux.HandleFunc("POST /v1/runs/{id}/start", func(response http.ResponseWriter, request *http.Request) {

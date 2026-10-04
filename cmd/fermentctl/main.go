@@ -13,6 +13,7 @@ import (
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/clock"
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/config"
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/httpapi"
+	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/scheduler"
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/service"
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/storage"
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/workflowcheck"
@@ -61,7 +62,17 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	app := service.New(store, clock.System{})
+	lock, err := storage.OpenScheduleLock(cfg.DataDir)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+
+	app := service.New(store, clock.System{}).WithScheduleLock(lock)
+	background := scheduler.New(app, cfg.SchedulerInterval)
+	background.Start()
+	defer background.Stop()
+
 	server := &http.Server{
 		Addr:              cfg.Address,
 		Handler:           httpapi.NewHandler(app),
@@ -75,6 +86,9 @@ func serve() error {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-stop
+		// Stop scheduling new passes before draining HTTP so no pass
+		// starts while the server is closing.
+		background.Stop()
 		ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {

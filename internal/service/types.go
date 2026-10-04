@@ -38,8 +38,16 @@ type CreateRunInput struct {
 }
 
 type ReserveRunInput struct {
-	ExpectedVersion *int64
-	VesselID        string
+	ExpectedVersion  *int64
+	VesselID         string
+	ScheduledStartAt *time.Time
+}
+
+// ScheduleRunInput registers a standalone one-shot action for a run.
+type ScheduleRunInput struct {
+	Action      domain.ScheduleAction
+	ScheduledAt time.Time
+	Note        string
 }
 
 type ObservationInput struct {

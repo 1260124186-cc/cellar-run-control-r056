@@ -69,6 +69,9 @@ func normalizeSnapshot(value domain.Snapshot) (domain.Snapshot, error) {
 	if value.Runs == nil {
 		value.Runs = map[string]domain.FermentationRun{}
 	}
+	if value.ScheduledActions == nil {
+		value.ScheduledActions = map[string]domain.ScheduledAction{}
+	}
 	if value.NameIndex == nil {
 		value.NameIndex = map[string]string{}
 	}
@@ -78,10 +81,34 @@ func normalizeSnapshot(value domain.Snapshot) (domain.Snapshot, error) {
 	if value.RunIndex == nil {
 		value.RunIndex = map[string]string{}
 	}
+	if err := validateScheduledActions(value.ScheduledActions); err != nil {
+		return domain.Snapshot{}, err
+	}
 	if err := validateIndexes(value); err != nil {
 		return domain.Snapshot{}, err
 	}
 	return value, nil
+}
+
+func validateScheduledActions(actions map[string]domain.ScheduledAction) error {
+	for id, action := range actions {
+		if action.ID != id {
+			return fmt.Errorf("scheduled action %s does not match its map key", id)
+		}
+		if !domain.IsKnownScheduleAction(action.Action) {
+			return fmt.Errorf("scheduled action %s has an unknown action", id)
+		}
+		if !domain.IsKnownScheduleState(action.State) {
+			return fmt.Errorf("scheduled action %s has an unknown state", id)
+		}
+		if action.RunID == "" || action.ScheduledAt.IsZero() {
+			return fmt.Errorf("scheduled action %s is missing its run or time", id)
+		}
+		if action.Attempts < 0 {
+			return fmt.Errorf("scheduled action %s has a negative attempt count", id)
+		}
+	}
+	return nil
 }
 
 func validateIndexes(value domain.Snapshot) error {
