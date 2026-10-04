@@ -1,12 +1,15 @@
 package workflowcheck
 
 import (
+	"context"
 	"fmt"
 	"net/http/httptest"
 	"os"
+	"time"
 
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/clock"
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/httpapi"
+	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/scheduler"
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/service"
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/storage"
 )
@@ -38,6 +41,13 @@ func Run(name string) error {
 		}
 	case "observations-completion":
 		if err := observationsCompletion(api); err != nil {
+			return err
+		}
+	case "scheduled-run-start":
+		dispatcher := scheduler.New(app, 20*time.Millisecond, 8)
+		dispatcher.Start(context.Background())
+		defer dispatcher.Stop()
+		if err := scheduledRunStart(api); err != nil {
 			return err
 		}
 	default:

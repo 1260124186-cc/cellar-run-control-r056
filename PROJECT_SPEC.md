@@ -97,6 +97,30 @@ time, gravity, temperature, optional note, and receipt time.
 - Gravity must not rise more than 0.010 above the immediately preceding value.
 - Observation sequences are contiguous and start at 1.
 
+### ScheduledTask
+
+A scheduled task contains an identifier, a run identifier, an action kind, a
+lifecycle state, a due time, claim and finish metadata, a failure reason or
+result note, version, and timestamps.
+
+States are `pending`, `running`, `succeeded`, and `needs_attention`. The
+only action kind is `start_fermentation`.
+
+- A task is registered against an existing, non-terminal run with a known
+  action kind and a valid due time.
+- A due task is claimed exactly once; competing dispatchers serialize on the
+  store mutex and only the claim winner executes the task.
+- The business transition and the terminal task state are committed in the
+  same atomic snapshot write, so a crash cannot persist one without the
+  other.
+- A task whose business effect is already visible succeeds without applying
+  a second transition.
+- A failed task keeps its reason in `needs_attention` and never blocks
+  other due tasks.
+- Tasks interrupted by a restart are reconciled at startup: fulfilled ones
+  are recorded as succeeded, all others move to `needs_attention` and are
+  never re-executed automatically.
+
 ## Connected Workflows
 
 ### 1. Formula Approval
@@ -150,6 +174,27 @@ transitions return stable failures without changing persisted state.
 This path crosses HTTP protocol handling, application orchestration, numeric
 domain rules, and snapshot storage.
 
+### 4. Scheduled Run Start
+
+Public entry points are:
+
+- `POST /v1/tasks`
+- `GET /v1/tasks`
+- `GET /v1/tasks/{id}`
+- `POST /v1/tasks/dispatch`
+- `GET /v1/runs/{id}`
+
+The client registers a one-shot `start_fermentation` action for a reserved
+run, the local scheduler executes it at its due time, and the client reads
+the task outcome and the fermenting run. Invalid kinds, missing runs,
+unknown tasks, and invalid state filters return stable error codes. A task
+whose run cannot start moves to `needs_attention` with the reason retained
+while later due tasks still execute, and concurrent dispatches advance the
+run exactly once.
+
+This path crosses HTTP protocol handling, application orchestration, the
+dispatch loop, domain rules, and atomic snapshot storage.
+
 ## Modules
 
 - `cmd/fermentctl`: executable entry point for the HTTP service and bounded
@@ -158,13 +203,14 @@ domain rules, and snapshot storage.
 - `internal/clock`: deterministic clock boundary for production and checks.
 - `internal/domain`: entities, validation, state transitions, and metrics.
 - `internal/service`: use-case orchestration and revision coordination.
+- `internal/scheduler`: due-time dispatch loop for scheduled run actions.
 - `internal/storage`: snapshot repository, atomic replacement, and locking.
 - `internal/httpapi`: routing, strict JSON decoding, error mapping, and health.
 - `internal/workflowcheck`: real HTTP workflow checks used by the executable.
 
 The dependency direction is:
 
-`cmd -> workflowcheck/httpapi -> service -> domain`
+`cmd -> workflowcheck/httpapi/scheduler -> service -> domain`
 
 `service -> storage`
 
@@ -198,6 +244,11 @@ an in-process mutex. The complete state is encoded, committed to durable
 storage, and then atomically renamed over the target. An update is not
 published in memory unless persistence succeeds.
 
+Scheduled tasks live in the same snapshot as runs and vessels. Claiming a
+task and recording its outcome are separate transactions, but the business
+transition and the terminal task state always commit together, so the queue
+and the aggregates can never disagree after a crash.
+
 Reads use copied values and never expose repository-owned maps or slices. The
 default address is `127.0.0.1:8088`, the request body limit is 1 MiB, and all
 workflow checks use temporary directories.
@@ -210,13 +261,14 @@ task owns systematic tests for validation boundaries, state transitions,
 numeric calculations, stale revisions, storage failures, and concurrent
 reservation attempts.
 
-The current build command is `go build ./...`. Three bounded production checks
+The current build command is `go build ./...`. Four bounded production checks
 start the real HTTP handler, issue real JSON requests, check success and failure
 behavior, and exit without external services:
 
 - `go run ./cmd/fermentctl check formula-approval`
 - `go run ./cmd/fermentctl check vessel-run-lifecycle`
 - `go run ./cmd/fermentctl check observations-completion`
+- `go run ./cmd/fermentctl check scheduled-run-start`
 
 ## Scope Limits
 

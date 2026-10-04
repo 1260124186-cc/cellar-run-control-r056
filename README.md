@@ -37,6 +37,10 @@ Environment variables:
 
 - `CELLAR_CONTROL_ADDR`: HTTP listen address.
 - `CELLAR_CONTROL_DATA_DIR`: directory containing `state.json`.
+- `CELLAR_CONTROL_SCHEDULER_INTERVAL`: due-task dispatch interval (default
+  `30s`; `0` disables the scheduler).
+- `CELLAR_CONTROL_SCHEDULER_BATCH`: maximum tasks executed per dispatch
+  (default `32`).
 
 Example:
 
@@ -54,6 +58,7 @@ internal/clock                 time boundary
 internal/config                environment configuration
 internal/domain                entities, validation, transitions, metrics
 internal/httpapi               HTTP routes, JSON decoding, errors
+internal/scheduler             due-time dispatch loop for scheduled actions
 internal/service               use-case orchestration
 internal/storage               revisioned snapshot persistence
 internal/workflowcheck         real HTTP production checks
@@ -94,6 +99,22 @@ Run workflow:
 - `POST /v1/runs/{id}/complete`
 - `POST /v1/runs/{id}/abort`
 
+Scheduled action workflow:
+
+- `POST /v1/tasks`
+- `GET /v1/tasks` (optional `run_id` and `state` filters)
+- `GET /v1/tasks/{id}`
+- `POST /v1/tasks/dispatch`
+
+A scheduled task registers a one-shot action for a run (currently
+`start_fermentation`) with a due time. The local scheduler claims each due
+task once, executes it, and keeps the outcome — `pending`, `running`,
+`succeeded`, or `needs_attention` with the failure reason — in the queryable
+queue. The business transition and the task outcome are committed in the
+same atomic snapshot write, and interrupted tasks are reconciled at startup,
+so a run is never advanced twice by concurrent dispatchers, restarts, or
+duplicate registrations.
+
 Writes accept an optional `X-Expected-Version` header. Errors use a stable
 shape:
 
@@ -115,6 +136,7 @@ Run each production workflow check separately:
 go run ./cmd/fermentctl check formula-approval
 go run ./cmd/fermentctl check vessel-run-lifecycle
 go run ./cmd/fermentctl check observations-completion
+go run ./cmd/fermentctl check scheduled-run-start
 ```
 
 Each check creates a temporary snapshot directory, starts the real HTTP

@@ -21,6 +21,8 @@ const (
 	CodeRunConflict         Code = "run_code_conflict"
 	CodeRunState            Code = "invalid_run_state"
 	CodeObservationConflict Code = "observation_conflict"
+	CodeTaskNotFound        Code = "task_not_found"
+	CodeTaskState           Code = "invalid_task_state"
 	CodeRevisionConflict    Code = "revision_conflict"
 	CodeStorage             Code = "storage_error"
 )

@@ -53,3 +53,25 @@ type ObservationInput struct {
 type FinishCleaningInput struct {
 	ExpectedVersion *int64
 }
+
+type ScheduleActionInput struct {
+	RunID string
+	Kind  domain.ActionKind
+	DueAt time.Time
+}
+
+type TaskFilter struct {
+	RunID string
+	State domain.TaskState
+}
+
+// DispatchSummary reports one pass over the due queue. Claimed counts the
+// tasks this controller claimed; Succeeded and NeedsAttention count the
+// terminal outcomes it recorded; Failed counts internal errors where the
+// outcome could not be persisted.
+type DispatchSummary struct {
+	Claimed        int `json:"claimed"`
+	Succeeded      int `json:"succeeded"`
+	NeedsAttention int `json:"needs_attention"`
+	Failed         int `json:"failed"`
+}

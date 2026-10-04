@@ -13,6 +13,7 @@ import (
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/clock"
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/config"
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/httpapi"
+	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/scheduler"
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/service"
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/storage"
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/workflowcheck"
@@ -62,6 +63,8 @@ func serve() error {
 		return err
 	}
 	app := service.New(store, clock.System{})
+	sched := scheduler.New(app, cfg.SchedulerInterval, cfg.SchedulerBatchSize)
+	sched.Start(context.Background())
 	server := &http.Server{
 		Addr:              cfg.Address,
 		Handler:           httpapi.NewHandler(app),
@@ -75,6 +78,7 @@ func serve() error {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-stop
+		sched.Stop()
 		ctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {
@@ -83,6 +87,10 @@ func serve() error {
 	}()
 
 	log.Printf("cellar run control listening on %s with data %s", cfg.Address, cfg.DataDir)
+	if cfg.SchedulerInterval > 0 {
+		log.Printf("scheduler dispatching every %s with batch size %d",
+			cfg.SchedulerInterval, cfg.SchedulerBatchSize)
+	}
 	err = server.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil

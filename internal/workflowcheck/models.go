@@ -35,6 +35,16 @@ type pairView struct {
 	Vessel vesselView `json:"vessel"`
 }
 
+type taskView struct {
+	ID         string            `json:"id"`
+	RunID      string            `json:"run_id"`
+	Kind       domain.ActionKind `json:"kind"`
+	State      domain.TaskState  `json:"state"`
+	Reason     string            `json:"reason"`
+	ResultNote string            `json:"result_note"`
+	Version    int64             `json:"version"`
+}
+
 func createFormulaPayload(name string) map[string]any {
 	return map[string]any{
 		"name":                    name,

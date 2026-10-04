@@ -69,6 +69,9 @@ func normalizeSnapshot(value domain.Snapshot) (domain.Snapshot, error) {
 	if value.Runs == nil {
 		value.Runs = map[string]domain.FermentationRun{}
 	}
+	if value.Tasks == nil {
+		value.Tasks = map[string]domain.ScheduledTask{}
+	}
 	if value.NameIndex == nil {
 		value.NameIndex = map[string]string{}
 	}

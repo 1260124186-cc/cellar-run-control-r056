@@ -2,6 +2,7 @@ package service
 
 import (
 	"sort"
+	"time"
 
 	"github.com/1260124186-cc/solo-0016-cellar-run-control/internal/domain"
 )
@@ -113,22 +114,11 @@ func (s *Service) StartRun(
 		if err := s.checkExpected(run.Version, input.ExpectedVersion); err != nil {
 			return err
 		}
-		if run.VesselID == nil {
-			return domain.NewError(domain.CodeRunState, "run has no vessel")
-		}
-		vessel, ok := snapshot.Vessels[*run.VesselID]
-		if !ok {
-			return domain.NewError(domain.CodeVesselNotFound, "vessel was not found")
-		}
-		if err := vessel.StartRun(run.ID, s.clock.Now()); err != nil {
+		started, vessel, err := applyStartFermentation(snapshot, id, s.clock.Now())
+		if err != nil {
 			return err
 		}
-		if err := run.StartFermentation(s.clock.Now()); err != nil {
-			return err
-		}
-		snapshot.Runs[id] = run.Clone()
-		snapshot.Vessels[vessel.ID] = vessel
-		updatedRun = run.Clone()
+		updatedRun = started
 		updatedVessel = vessel
 		return nil
 	})
@@ -136,6 +126,41 @@ func (s *Service) StartRun(
 		return domain.FermentationRun{}, domain.Vessel{}, err
 	}
 	return updatedRun, updatedVessel, nil
+}
+
+// applyStartFermentation advances a reserved run and its vessel inside an
+// open store transaction. The run and vessel copies are written back only
+// after both transitions succeed, so a rejection leaves the snapshot
+// untouched. It is shared by the HTTP start route and the scheduler's task
+// executor.
+func applyStartFermentation(
+	snapshot *domain.Snapshot,
+	runID string,
+	now time.Time,
+) (domain.FermentationRun, domain.Vessel, error) {
+	run, ok := snapshot.Runs[runID]
+	if !ok {
+		return domain.FermentationRun{}, domain.Vessel{},
+			domain.NewError(domain.CodeRunNotFound, "run was not found")
+	}
+	if run.VesselID == nil {
+		return domain.FermentationRun{}, domain.Vessel{},
+			domain.NewError(domain.CodeRunState, "run has no vessel")
+	}
+	vessel, ok := snapshot.Vessels[*run.VesselID]
+	if !ok {
+		return domain.FermentationRun{}, domain.Vessel{},
+			domain.NewError(domain.CodeVesselNotFound, "vessel was not found")
+	}
+	if err := vessel.StartRun(run.ID, now); err != nil {
+		return domain.FermentationRun{}, domain.Vessel{}, err
+	}
+	if err := run.StartFermentation(now); err != nil {
+		return domain.FermentationRun{}, domain.Vessel{}, err
+	}
+	snapshot.Runs[runID] = run.Clone()
+	snapshot.Vessels[vessel.ID] = vessel
+	return run.Clone(), vessel, nil
 }
 
 func (s *Service) AbortRun(

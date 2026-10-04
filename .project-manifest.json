@@ -29,6 +29,11 @@
       "responsibility": "orchestrate formulas, vessels, runs, and observations"
     },
     {
+      "id": "scheduler",
+      "path": "internal/scheduler",
+      "responsibility": "dispatch due scheduled actions exactly once"
+    },
+    {
       "id": "storage",
       "path": "internal/storage",
       "responsibility": "persist and load revisioned JSON snapshots atomically"
@@ -109,6 +114,27 @@
       "verification": "the check issues real HTTP requests and rejects malformed observations",
       "module_ids": [
         "httpapi",
+        "service",
+        "domain",
+        "storage"
+      ]
+    },
+    {
+      "id": "scheduled-run-start",
+      "name": "Register a scheduled action and let the dispatcher start fermentation",
+      "entry": "POST /v1/tasks",
+      "steps": [
+        "register a one-shot start action for a reserved run",
+        "execute the due task through the local scheduler",
+        "record failed tasks with their reason without blocking others",
+        "keep waiting, executing, succeeded, and attention outcomes queryable"
+      ],
+      "success": "returns the succeeded task and a run advanced exactly once",
+      "failure": "returns a stable validation, not-found, or state error without partial writes",
+      "verification": "the check issues real HTTP requests, races concurrent dispatches, and inspects task and run outcomes",
+      "module_ids": [
+        "httpapi",
+        "scheduler",
         "service",
         "domain",
         "storage"
